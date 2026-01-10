@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>MahaFIR Downloader</title>
+
+  <!-- Bootstrap 5 -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+
+  <style>
+    body {
+      background-color: #f8f9fa;
+    }
+    #log {
+      height: 260px;
+      overflow-y: auto;
+      background: #000;
+      color: #0f0;
+      padding: 10px;
+      font-size: 14px;
+      border-radius: 5px;
+    }
+    #fileTree {
+      max-height: 260px;
+      overflow-y: auto;
+    }
+    .folder {
+      font-weight: bold;
+    }
+    .file {
+      padding-left: 20px;
+    }
+  </style>
+</head>
+
+<body>
+<div class="container py-4">
+
+  <h2 class="mb-4 text-center">📁 MahaFIR Downloader</h2>
+
+  <div class="row g-4">
+
+    <!-- FORM -->
+    <div class="col-lg-4">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <form id="downloadForm">
+
+            <div class="mb-3">
+              <label class="form-label">From Date</label>
+              <input type="date" name="fromDate" class="form-control" required>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">To Date</label>
+              <input type="date" name="toDate" class="form-control" required>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Request Name</label>
+              <input type="text" name="requestName" class="form-control" required>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">City</label>
+              <select id="city" name="cityValue" class="form-select" required>
+                <option>Loading cities...</option>
+              </select>
+            </div>
+
+            <button class="btn btn-primary w-100" type="submit">
+              ▶ Start Download
+            </button>
+
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT SIDE -->
+    <div class="col-lg-8">
+
+      <!-- LOG -->
+      <div class="card shadow-sm mb-3">
+        <div class="card-header bg-dark text-white">
+          Live Download Log
+        </div>
+        <div class="card-body p-2">
+          <pre id="log"></pre>
+        </div>
+      </div>
+
+      <!-- FILE MANAGER -->
+      <div class="card shadow-sm">
+        <div class="card-header">
+          Download Folder
+        </div>
+        <div class="card-body" id="fileTree">
+          <div class="text-muted">Waiting for download...</div>
+        </div>
+      </div>
+
+    </div>
+
+    <hr>
+    <h2>Downloaded Requests</h2>
+    <div id="downloadsTree"></div>
+</div>
+
+<script src="/main.js"></script>
+
+<script>
+/* ------------------ LOAD CITIES ------------------ */
+fetch("/cities")
+  .then(res => res.json())
+  .then(cities => {
+    const dropdown = document.getElementById("city");
+    dropdown.innerHTML = '<option value="">Select City</option>';
+
+    cities.forEach(c => {
+      const opt = document.createElement("option");
+      opt.value = c.value;
+      opt.textContent = c.text;
+      dropdown.appendChild(opt);
+    });
+  });
+
+/* ------------------ SIMPLE FILE TREE FROM LOG ------------------ */
+let currentFolder = null;
+
+function handleFileTree(line) {
+  line = line.trim();
+  if (!line) return;
+
+  // New station folder
+  if (line.startsWith("Processing station:")) {
+    currentFolder = document.createElement("div");
+    currentFolder.className = "folder mb-1";
+    currentFolder.textContent = "📂 " + line.replace("Processing station:", "").trim();
+    fileTree.appendChild(currentFolder);
+  }
+
+  // PDF file
+  if (line.startsWith("Saved FIR:") && currentFolder) {
+    const file = document.createElement("div");
+    file.className = "file text-muted";
+    file.textContent = "📄 " + line.replace("Saved FIR:", "").trim();
+    fileTree.appendChild(file);
+  }
+
+  // Completion
+  if (line === "DOWNLOAD COMPLETE") {
+    const doneMsg = document.createElement("div");
+    doneMsg.className = "text-success fw-bold mt-2";
+    doneMsg.textContent = "✔ Download Completed Successfully";
+    fileTree.appendChild(doneMsg);
+  }
+}
+
+
+async function loadDownloads() {
+  const res = await fetch("/downloads");
+  const data = await res.json();
+
+  const container = document.getElementById("downloadsTree");
+  container.innerHTML = "";
+
+  data.forEach(req => {
+    const reqDetails = document.createElement("details");
+    reqDetails.style.marginBottom = "10px";
+
+    const reqSummary = document.createElement("summary");
+    reqSummary.innerHTML = `
+      <strong>📁 ${req.request_name}</strong>
+      <br>
+      <small>City: ${req.city} | ${new Date(req.created_at).toLocaleString()}</small>
+    `;
+    reqDetails.appendChild(reqSummary);
+
+    Object.keys(req.stations).forEach(station => {
+      const stDetails = document.createElement("details");
+      stDetails.style.marginLeft = "20px";
+
+      const stSummary = document.createElement("summary");
+      stSummary.innerHTML = `📂 <b>${station}</b>`;
+      stDetails.appendChild(stSummary);
+
+      req.stations[station].forEach(fir => {
+        const file = document.createElement("div");
+        file.style.marginLeft = "20px";
+        file.innerHTML = `
+          📄 <a href="/${fir.pdf_path.replace(/\\/g, "/")}" target="_blank">
+            FIR ${fir.fir_no}
+          </a>
+        `;
+        stDetails.appendChild(file);
+      });
+
+      reqDetails.appendChild(stDetails);
+    });
+
+    container.appendChild(reqDetails);
+  });
+}
+
+loadDownloads();
+</script>
+
+</body>
+</html>
