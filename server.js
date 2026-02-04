@@ -22,39 +22,38 @@ app.get("/", (req, res) => {
 
 /* ------------------ GET CITIES ------------------ */
 app.get("/cities", async (req, res) => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-
   try {
-    await page.goto(
-      "https://citizen.mahapolice.gov.in/citizen/mh/PublishedFIRs.aspx",
-      { waitUntil: "load" }
-    );
+    const [rows] = await db.query("SELECT city_id as value, city_name as text FROM maharashtra_cities ORDER BY city_name");
 
-    await page.reload({ waitUntil: "load" });
+    if (rows.length > 0) {
+      console.log(`[DB] Fetched ${rows.length} cities.`);
+      return res.json(rows);
+    }
 
-    await page.waitForFunction(() => {
-      const ddl = document.querySelector("#ContentPlaceHolder1_ddlDistrict");
-      return ddl && ddl.options.length > 1;
-    }, { timeout: 30000 });
+    // Fallback to scraping if DB is empty
+    console.log("[SCRAPE] DB empty, falling back to scraping cities...");
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.goto("https://citizen.mahapolice.gov.in/citizen/mh/PublishedFIRs.aspx", { waitUntil: "load" });
+      await page.reload({ waitUntil: "load" });
+      await page.waitForFunction(() => {
+        const ddl = document.querySelector("#ContentPlaceHolder1_ddlDistrict");
+        return ddl && ddl.options.length > 1;
+      }, { timeout: 30000 });
 
-    const cities = await page.evaluate(() => {
-      return Array.from(
-        document.querySelectorAll("#ContentPlaceHolder1_ddlDistrict option")
-      )
-        .filter(o => o.value && o.value !== "0")
-        .map(o => ({
-          value: o.value,
-          text: o.textContent.trim()
-        }));
-    });
-    console.log("Total cities:", cities.length);
-
-    await browser.close();
-    res.json(cities);
-
+      const cities = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll("#ContentPlaceHolder1_ddlDistrict option"))
+          .filter(o => o.value && o.value !== "0")
+          .map(o => ({ value: o.value, text: o.textContent.trim() }));
+      });
+      await browser.close();
+      res.json(cities);
+    } catch (err) {
+      await browser.close();
+      throw err;
+    }
   } catch (err) {
-    await browser.close();
     console.error("CITY LOAD ERROR:", err);
     res.status(500).json({ error: "Failed to load cities" });
   }
@@ -68,52 +67,47 @@ app.get("/stations", async (req, res) => {
     return res.status(400).json({ error: "City value is required" });
   }
 
-  console.log(`[GET /stations] Fetching stations for city value: ${cityValue}`);
-
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-
   try {
-    await page.goto(
-      "https://citizen.mahapolice.gov.in/citizen/mh/PublishedFIRs.aspx",
-      { waitUntil: "load" }
+    const [rows] = await db.query(
+      "SELECT station_id as value, station_name as text FROM maharashtra_police_stations WHERE city_id = ? ORDER BY station_name",
+      [cityValue]
     );
 
-    // Reload to ensure state is clean (consistent with /cities endpoint)
-    await page.reload({ waitUntil: "load" });
+    if (rows.length > 0) {
+      console.log(`[DB] Fetched ${rows.length} stations for city ${cityValue}.`);
+      return res.json(rows);
+    }
 
-    // Wait for City dropdown to populate
-    await page.waitForFunction(() => {
-      const ddl = document.querySelector("#ContentPlaceHolder1_ddlDistrict");
-      return ddl && ddl.options.length > 1;
-    }, { timeout: 30000 });
+    // Fallback to scraping if DB has no stations for this city
+    console.log(`[SCRAPE] No stations in DB for city ${cityValue}, falling back to scraping...`);
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.goto("https://citizen.mahapolice.gov.in/citizen/mh/PublishedFIRs.aspx", { waitUntil: "load" });
+      await page.reload({ waitUntil: "load" });
+      await page.waitForFunction(() => {
+        const ddl = document.querySelector("#ContentPlaceHolder1_ddlDistrict");
+        return ddl && ddl.options.length > 1;
+      }, { timeout: 30000 });
 
-    // Select City
-    await page.selectOption("#ContentPlaceHolder1_ddlDistrict", cityValue);
+      await page.selectOption("#ContentPlaceHolder1_ddlDistrict", cityValue);
+      await page.waitForFunction(() => {
+        const ps = document.querySelector("#ContentPlaceHolder1_ddlPoliceStation");
+        return ps && ps.options.length > 1;
+      }, { timeout: 30000 });
 
-    await page.waitForFunction(() => {
-      const ps = document.querySelector("#ContentPlaceHolder1_ddlPoliceStation");
-      return ps && ps.options.length > 1;
-    }, { timeout: 30000 });
-
-    const stations = await page.evaluate(() => {
-      return Array.from(
-        document.querySelectorAll("#ContentPlaceHolder1_ddlPoliceStation option")
-      )
-        .filter(o => o.value && o.value !== "0" && o.value !== "Select")
-        .map(o => ({
-          value: o.value,
-          text: o.textContent.trim()
-        }));
-    });
-
-    console.log(`[GET /stations] Found ${stations.length} stations for city ${cityValue}`);
-
-    await browser.close();
-    res.json(stations);
-
+      const stations = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll("#ContentPlaceHolder1_ddlPoliceStation option"))
+          .filter(o => o.value && o.value !== "0" && o.value !== "Select")
+          .map(o => ({ value: o.value, text: o.textContent.trim() }));
+      });
+      await browser.close();
+      res.json(stations);
+    } catch (err) {
+      await browser.close();
+      throw err;
+    }
   } catch (err) {
-    await browser.close();
     console.error("STATION LOAD ERROR:", err);
     res.status(500).json({ error: "Failed to load stations" });
   }
